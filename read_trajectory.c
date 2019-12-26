@@ -7,11 +7,8 @@ void read_dirs(void){
   FILE *fp;
 
   nf = get_ndirs();
-  dir_name = malloc(nf * sizeof(dir_name));
-  //memset(dir_name, '.', nf*sizeof(char));
-  printf("%lu\n",sizeof(dir_name));
-  sprintf(cmd,"ls -d */ | sed 's#/##'");
-  fp=popen(cmd,"r"); 
+  dir_name =  malloc(nf * sizeof(dir_name));
+  sprintf(cmd,"ls -d */ | sed 's#/##'"); fp=popen(cmd,"r"); 
 
   ndir = 0;
   while (fscanf(fp,"%s",dir_list) == 1)
@@ -20,22 +17,29 @@ void read_dirs(void){
     //! checl=k if PARAM.base file exist in the directory
     int j = file_exists("PARAM.base");
     if (j == 1) {
-      strcpy(dir_name[ndir], dir_list);
-      //dir_name[ndir]= dir_list;
-      printf("%s\n",dir_list);
-      ndir += 1; 
+      strcpy(dir_name[ndir], dir_list); ndir += 1; 
     }
     chdir("..");
   }
-  printf("main: number of run dirs is %i:\n", ndir);
-  pclose(fp);
-
+  printf("\nmain: number of run dirs: %i:\n\n", ndir); pclose(fp);
 
   dir_name = realloc(dir_name, ndir * sizeof(dir_name));
-  printf("main: directories to get mean of %i:\n",ndir);
-  int i;
-  for ( i = 0; i < ndir; i++)
+
+  int i, k;
+  for ( k = 1; k < 21; k++)
   {
-    printf("%s\n", dir_name[i]);
+    for ( i = 0; i < ndir; i++)
+      {
+        chdir (dir_name[i]);
+          char kick[256]; snprintf(kick, 4, "%f", k * 0.1);
+          chdir(kick);
+            int t = get_gz();
+          chdir("..");
+          if (t == 1){
+            printf("\non %s/%s there is traj file\n", dir_name[i], kick);
+            
+          }
+        chdir ("..");
+      }
   }
 }
