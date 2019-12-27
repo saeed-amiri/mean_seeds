@@ -1,3 +1,19 @@
+#define ERRORFILE       "JOBINFO"
+typedef struct LATTICE
+{
+  // space dimension
+  int DIM;
+  // size of system edges;
+  double BOX[3];
+  // number of atoms
+  int NATOMS;
+  // number of degrees of freedon
+  int DOF;
+  // arrays for particle positions
+  double *POS;
+
+} LATTICE;
+
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>

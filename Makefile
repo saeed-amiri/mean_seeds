@@ -1,6 +1,6 @@
 EXEC  = ../mean_seeds
 
-OBJ   = main.o read_trajectory.o tools.c
+OBJ   = main.o read_trajectory.o tools.c read_INIT.c
 
 # options for GWDG, intel cluster
 INCLUDE = /cm/shared/apps/intel/compilers_and_libraries/2017.2.174/mkl/include/fftw

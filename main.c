@@ -1,6 +1,6 @@
 #include "defs.h"
-
-int RUNID;
+#include "shortcuts.h"
+int RUNID; LATTICE LAT;
 int main(int argc,char **argv){
 
   // get RUNID of data to analyze

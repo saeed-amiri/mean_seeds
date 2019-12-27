@@ -49,27 +49,10 @@ int get_gz(void)
   return 0;
 }
 
-void get_info( char dir[4], int step )
-{
-  char kick[4]="0.1";
-  int i, j = 0;
-  chdir( dir );
-    chdir( kick );
-      j +=1;
-      printf("j is %i\n",j);
-      //char pwd[1024];
-      //strcpy( pwd, get_pwd() );
-      //printf("\npwd:%s\n\n", pwd);
-      //step = get_time();
-      //printf("time steps is : %i\n\n", time_step);}
-    chdir( ".." );
-  chdir( ".." );
-  step = 0;
-}
 int get_time( void )
 {
   char cmd[1024]; int n; FILE *fp;
-  sprintf( cmd,"zgrep TIMESTEP | wc -l" );
+  sprintf( cmd,"zgrep TIMESTEP traj.%i | wc -l", RUNID );
   fp = popen( cmd,"r" ); fscanf( fp,"%i",&n ); pclose( fp );
   return n;
 }
@@ -80,4 +63,92 @@ char* get_pwd( void ){
   sprintf( cmd,"pwd" );
   fp = popen( cmd,"r" ); fscanf( fp, "%s", pwd ); pclose( fp );
   return pwd;
+}
+//! [RV] HELPER ROUTINES, for processing of strings
+
+int StartsWith(const char *a, const char *b)
+{
+ if(strncmp(a, b, strlen(b)) == 0) return 1;
+ return 0;
+}
+
+int EndsWith(const char *a, const char *b)
+{ int i=strlen(a)-strlen(b);
+  if(i>=0) if(strcmp(&a[i],b)==0) return 1;
+  return 0;
+}
+// //
+
+void get_info( char dir[4], int *step )
+{
+  char kick[4]="0.1";
+  char dirk[512], cwd[1024];
+  strcpy( cwd, get_pwd() );
+  printf("\npwd:%s\n\n", cwd);
+  sprintf(dirk,"%s/%s/%s",cwd,dir,kick);
+  printf("here: %s\n",dirk);
+  chdir( dirk );
+      *step = get_time();
+      rl_2D_pbc();
+  chdir( cwd );
+}
+/* printwarning and printerror use variable argument lists :: this is tricky
+   C-stuff which you don't need to understand */
+
+void printwarning(char *msg, ...)
+{ FILE *fp;
+  char dd[1024];
+  struct tm *ptr;
+  time_t tm;
+  va_list argp;
+
+  /* generate date label dd */
+
+  tm=time(NULL); ptr=localtime(&tm);
+  strftime(dd,100,"%b-%d-%Y-%H.%M",ptr);
+
+  /* print error to screen... */
+
+  va_start(argp,msg);
+  vfprintf(stderr,msg,argp);
+  va_end(argp);
+
+  /* ...and to logfile... */
+
+  fp=fopen(ERRORFILE,"a");
+  va_start(argp,msg);
+  fprintf(fp,"%s: RUNID=%i: ",dd,RUNID);
+  vfprintf(fp,msg,argp);
+  va_end(argp); fflush(fp); fclose(fp);
+}
+
+void printerror(char *msg, ...)
+{ FILE *fp;
+  char dd[1024];
+  struct tm *ptr;
+  time_t tm;
+  va_list argp;
+
+  /* generate date label dd */
+
+  tm=time(NULL); ptr=localtime(&tm);
+  strftime(dd,100,"%b-%d-%Y-%H.%M",ptr);
+
+  /* print error to screen... */
+
+  va_start(argp,msg);
+  vfprintf(stderr,msg,argp);
+  va_end(argp);
+
+  /* ...and to logfile... */
+
+  fp=fopen(ERRORFILE,"a");
+  va_start(argp,msg);
+  fprintf(fp,"%s: RUNID=%i: ",dd,RUNID);
+  vfprintf(fp,msg,argp);
+  va_end(argp); fflush(fp); fclose(fp);
+
+  MPI_Finalize();
+
+  exit(1);
 }
