@@ -84,9 +84,7 @@ void get_info( char dir[4], int *step )
   char kick[4]="0.1";
   char dirk[512], cwd[1024];
   strcpy( cwd, get_pwd() );
-  printf("\npwd:%s\n\n", cwd);
   sprintf(dirk,"%s/%s/%s",cwd,dir,kick);
-  printf("here: %s\n",dirk);
   chdir( dirk );
       *step = get_time();
       rl_2D_pbc();
@@ -98,14 +96,7 @@ void get_info( char dir[4], int *step )
 void printwarning(char *msg, ...)
 { FILE *fp;
   char dd[1024];
-  struct tm *ptr;
-  time_t tm;
   va_list argp;
-
-  /* generate date label dd */
-
-  tm=time(NULL); ptr=localtime(&tm);
-  strftime(dd,100,"%b-%d-%Y-%H.%M",ptr);
 
   /* print error to screen... */
 
@@ -125,14 +116,7 @@ void printwarning(char *msg, ...)
 void printerror(char *msg, ...)
 { FILE *fp;
   char dd[1024];
-  struct tm *ptr;
-  time_t tm;
   va_list argp;
-
-  /* generate date label dd */
-
-  tm=time(NULL); ptr=localtime(&tm);
-  strftime(dd,100,"%b-%d-%Y-%H.%M",ptr);
 
   /* print error to screen... */
 
@@ -148,7 +132,26 @@ void printerror(char *msg, ...)
   vfprintf(fp,msg,argp);
   va_end(argp); fflush(fp); fclose(fp);
 
-  MPI_Finalize();
-
   exit(1);
+}
+
+int split_string(char *in,STRING *out)
+{ int i,c,w=0; char buffer[1024];
+  // add leading space to input string
+  sprintf(buffer," %s",in);
+  // scan the string, looking for words
+  for(i=1;i<(int)strlen(buffer);i++) {
+    // start of new word
+    if(isspace(buffer[i-1]) && !isspace(buffer[i])) {
+      c=0; w++;
+    }
+    // write single word characters to array out; be sure to null-terminate (!)
+    if(!isspace(buffer[i])) {
+      out[w-1].w[c]=buffer[i];
+      c++;
+      out[w-1].w[c]='\0';
+    }
+  }
+  // also return how many words were counted
+  return w;
 }

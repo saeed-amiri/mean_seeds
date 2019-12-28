@@ -14,6 +14,10 @@ typedef struct LATTICE
 
 } LATTICE;
 
+typedef struct STRING
+{ int c,ok; char w[1024]; double v;
+} STRING;
+
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
