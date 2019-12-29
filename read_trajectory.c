@@ -9,7 +9,7 @@ static FILE *TR,*PR;
 
 
 void read_dirs(void){
-  char (*dir_name)[512];
+  char (*dir_name)[2056];
   int nf, ndir, nStep;
   char cmd[1024], dir_list[512];
   double *xp, *yp, *vx, *vy;
@@ -20,10 +20,10 @@ void read_dirs(void){
   STRING KEYS[20],FIELDS[20],*PTR;
   char buffer[1024]; int i,n,c,nc,nreq;
 
-
+  char pmd[1024];
   nf = get_ndirs();
   dir_name =  malloc(nf * sizeof(dir_name));
-  sprintf(cmd,"ls -d */ | sed 's#/##'"); fp=popen(cmd,"r"); 
+  sprintf(pmd,"ls -d */ | sed 's#/##'"); fp=popen(pmd,"r"); 
 
   ndir = 0;
   while (fscanf(fp,"%s",dir_list) == 1)
@@ -46,38 +46,48 @@ void read_dirs(void){
   */
 
   get_info( dir_name[0], &nStep );
-  printf( "%i\n", nStep );
+  printf( "%i, %i\n", nStep, DOF );
   printf( "number %i\n", NATOMS );
   xp = (double *)malloc( NATOMS * nStep * sizeof( double ) );
   yp = (double *)malloc( NATOMS * nStep * sizeof( double ) );
   vx = (double *)malloc( NATOMS * nStep * sizeof( double ) );
   vy = (double *)malloc( NATOMS * nStep * sizeof( double ) );
-  
-  int idir, ikick;
-  for ( ikick = 1; ikick < 21; ikick++)
+    
+  int idir, ikick, iloop;
+  for ( ikick = 1; ikick < 2; ikick++)
   {
+    for (iloop = 0; iloop < NATOMS * nStep; iloop++)
+    {
+      xp[iloop] = 0; yp[iloop] = 0; 
+      vx[iloop] = 0; vy[iloop] = 0; 
+    }
     for ( idir = 0; idir < ndir; idir++)
     {
       char kick[4]; snprintf( kick, 4, "%f", ikick * 0.1 );
       char cwd[1024]; strcpy( cwd, get_pwd() );
-      char here[1024]; 
+      char here[2056]; int icntrl = 0;
       strcpy( here, strcat(strcat(strcat(cwd,"/"),dir_name[idir]),"/") );
       strcat( here, kick );
-      chdir ( here );
-        //! prepare a list of the required lammps atom quantities, 
-        //! store in data structure = KEYS
-        nreq=split_string("c_R[1] c_R[2] vx vy fx fy",KEYS);
+      char traj[10]; sprintf(traj, "traj.%i.gz",RUNID);
+      strcat( strcat( here, "/" ), traj );
+      //! prepare a list of the required lammps atom quantities, 
+      //! store in data structure = KEYS
+      //! set TR = file pointer for reading the trajectory
+      sprintf(cmd,"zcat %s",here); TR=popen(cmd,"r");
 
-        while( fgets(buffer,sizeof buffer,TR)!=NULL ) 
+      nreq=split_string("c_R[1] c_R[2] vx vy fx fy",KEYS);
+
+      while( fgets(buffer,sizeof buffer,TR)!=NULL ) 
+      {
+        //! beginning of new snapshot
+        if(StartsWith(buffer,"ITEM: TIMESTEP"))
         {
-          // beginning of new snapshot
-          if(StartsWith(buffer,"ITEM: TIMESTEP")) {
-            fgets(buffer,sizeof buffer,TR);
-            sscanf(buffer,"%li",&timestep);
-            NC++; goto nextline;
+          fgets(buffer,sizeof buffer,TR);
+          sscanf(buffer,"%li",&timestep);
+          NC++; goto nextline;
         }
-
-        // if snapshot index NC is not in the range of the current processor, skip it
+        
+        //! if snapshot index NC is not in the range of the current processor, skip it
         if(NC<NCMIN || NC>=NCMAX) goto nextline;
 
         if(StartsWith(buffer,"ITEM: NUMBER OF ATOMS")) 
@@ -87,33 +97,37 @@ void read_dirs(void){
           goto nextline;
         }
 
-        // HERE THE ATOM DATA IS BEING READ, THEN ANALYZED 
+        //! HERE THE ATOM DATA IS BEING READ, THEN ANALYZED 
 
         if(StartsWith(buffer,"ITEM: ATOMS")) 
         {
-          // make a list structure of the atom properties stored in the data
+          //! make a list structure of the atom properties stored in the data
           nc=split_string(buffer,FIELDS)-2; PTR=&FIELDS[2];
 
-          // needed for sanity check
+          //! needed for sanity check
           for(i=0;i<=nreq;i++) KEYS[i].ok=0;
 
-          // for every field in PTR mark the order in which it appears in KEYS; use -1 for fields that are __not__ members of KEYS
-          for(c=0;c<nc;c++) {
+          //! for every field in PTR mark the order in which it appears in KEYS; use -1 for fields that are __not__ members of KEYS
+          for(c=0;c<nc;c++) 
+          {
             PTR[c].c=-1;
-            // atom ids are always required, we put these last = nreq (!)
-            if(strcmp(PTR[c].w,"id")==0) {
+            //! atom ids are always required, we put these last = nreq (!)
+            if(strcmp(PTR[c].w,"id")==0) 
+            {
               PTR[c].c=nreq; KEYS[nreq].ok++;
-            } else {
-              for(i=0;i<nreq;i++) if(strcmp(PTR[c].w,KEYS[i].w)==0) {
+            } else 
+            {
+              for(i=0;i<nreq;i++) if(strcmp(PTR[c].w,KEYS[i].w)==0) 
+              {
                 PTR[c].c=i; KEYS[i].ok++; break;
               }
             }
           }
-          // SANITY CHECK (!)
+          //! SANITY CHECK (!)
           if(KEYS[nreq].ok!=1) printerror("E: missing/duplicate atom ids\n");
           for(i=0;i<nreq;i++) if(KEYS[i].ok!=1) printerror("E: missing/duplicate atom property: %s\n",KEYS[i].w);
 
-          // read and store the data
+          //! read and store the data
           data=(double*)malloc(natoms*nreq*sizeof(double));
           for(i=c=n=0;i<natoms*nc;i++) 
           {
@@ -122,22 +136,30 @@ void read_dirs(void){
             c++; 
             if(c==nc) 
             {
-              // convert lammps id to C-style, store data
+              //! convert lammps id to C-style, store data
               ind=(int)KEYS[nreq].v; ind--;
               for(j=0;j<nreq;j++) data[j*natoms+ind]=KEYS[j].v;
               c=0; n++;
             }
           }
-          // pointers to displacements, velocities, forces
-          xp=&data[0]; yp=&data[NATOMS]; 
-          vx=&data[DOF]; vx=&data[DOF+NATOMS];
-          // clean-up (!)
+          //! pointers to displacements, velocities, forces, DOF = 2 * NATOMS
+          int icpy; printf("here data %lf\n", data[0]);
+          for ( icpy = 0; icpy < NATOMS; icpy++)
+          {
+            xp[icpy + icntrl * NATOMS] += data[icpy];
+            yp[icpy + icntrl * NATOMS] += data[icpy + NATOMS];
+            vx[icpy + icntrl * NATOMS] += data[DOF];
+            vy[icpy + icntrl * NATOMS] += data[DOF + NATOMS];
+          }
+          icntrl += 1;
+          //xp=&data[0]; yp=&data[NATOMS]; 
+          //vx=&data[DOF]; vx=&data[DOF+NATOMS];
+          //! clean-up (!)
           free(data);
         }
-
         nextline:;
+        //printf("%s\n%i\n", here, icntrl);
       }
-      chdir(cwd);
     }
   }
 }
