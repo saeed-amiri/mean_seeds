@@ -1,18 +1,18 @@
 #include "defs.h"
 #include "shortcuts.h"
 // index counting the current snapshot while reading the lammps trajectory file
-static int NC=-1;
+//static int NC=-1;
 // these are used to set the snapshot range each process has to analyze
-static int NCMIN,NCMAX;
+//static int NCMIN,NCMAX;
 // file pointers, explained below
 static FILE *TR,*PR;
-
+static double *xp, *yp, *vx, *vy;
+static void write_out(double *DUMP,long step);
 
 void read_dirs(void){
-  char (*dir_name)[2056];
+  char (*dir_name)[9];
   int nf, ndir, nStep;
   char cmd[1024], dir_list[512];
-  double *xp, *yp, *vx, *vy;
   FILE *fp;
   int natoms,ind,j;
   long timestep;
@@ -37,6 +37,11 @@ void read_dirs(void){
     chdir("..");
   }
   printf("\nmain: number of run dirs: %i:\n\n", ndir); pclose(fp);
+  int ilen;
+  for (ilen = 0; ilen < ndir; ilen++)
+  {
+    printf("%s, %lu\n",dir_name[ilen],strlen(dir_name[ilen]));
+  }
 
   dir_name = realloc(dir_name, ndir * sizeof(dir_name));
   
@@ -48,24 +53,21 @@ void read_dirs(void){
   get_info( dir_name[0], &nStep );
   printf( "%i, %i\n", nStep, DOF );
   printf( "number %i\n", NATOMS );
-  xp = (double *)malloc( NATOMS * nStep * sizeof( double ) );
-  yp = (double *)malloc( NATOMS * nStep * sizeof( double ) );
-  vx = (double *)malloc( NATOMS * nStep * sizeof( double ) );
-  vy = (double *)malloc( NATOMS * nStep * sizeof( double ) );
-    
-  int idir, ikick, iloop;
+  PR = fopen("mean","w");
+  int idir, ikick, NC;
   for ( ikick = 1; ikick < 2; ikick++)
   {
-    for (iloop = 0; iloop < NATOMS * nStep; iloop++)
-    {
-      xp[iloop] = 0; yp[iloop] = 0; 
-      vx[iloop] = 0; vy[iloop] = 0; 
-    }
+    NC = -1;
+    xp = (double *)malloc( NATOMS * sizeof( double ) );
+    yp = (double *)malloc( NATOMS * sizeof( double ) );
+    vx = (double *)malloc( NATOMS * sizeof( double ) );
+    vy = (double *)malloc( NATOMS * sizeof( double ) );
+
     for ( idir = 0; idir < ndir; idir++)
     {
       char kick[4]; snprintf( kick, 4, "%f", ikick * 0.1 );
       char cwd[1024]; strcpy( cwd, get_pwd() );
-      char here[2056]; int icntrl = 0;
+      char here[2056];
       strcpy( here, strcat(strcat(strcat(cwd,"/"),dir_name[idir]),"/") );
       strcat( here, kick );
       char traj[10]; sprintf(traj, "traj.%i.gz",RUNID);
@@ -76,7 +78,7 @@ void read_dirs(void){
       sprintf(cmd,"zcat %s",here); TR=popen(cmd,"r");
 
       nreq=split_string("c_R[1] c_R[2] vx vy fx fy",KEYS);
-
+      printf("dir %s\n", dir_name[idir]);
       while( fgets(buffer,sizeof buffer,TR)!=NULL ) 
       {
         //! beginning of new snapshot
@@ -86,9 +88,8 @@ void read_dirs(void){
           sscanf(buffer,"%li",&timestep);
           NC++; goto nextline;
         }
-        
         //! if snapshot index NC is not in the range of the current processor, skip it
-        if(NC<NCMIN || NC>=NCMAX) goto nextline;
+        //if(NC<NCMIN || NC>=NCMAX) goto nextline;
 
         if(StartsWith(buffer,"ITEM: NUMBER OF ATOMS")) 
         {
@@ -134,6 +135,7 @@ void read_dirs(void){
             fscanf(TR,"%lf",&tmp);
             ind=PTR[c].c; if(ind>=0) KEYS[ind].v=tmp;
             c++; 
+            printf("nc: %i %i\n",c, nc);
             if(c==nc) 
             {
               //! convert lammps id to C-style, store data
@@ -142,19 +144,8 @@ void read_dirs(void){
               c=0; n++;
             }
           }
-          //! pointers to displacements, velocities, forces, DOF = 2 * NATOMS
-          int icpy; printf("here data %lf\n", data[0]);
-          for ( icpy = 0; icpy < NATOMS; icpy++)
-          {
-            xp[icpy + icntrl * NATOMS] += data[icpy];
-            yp[icpy + icntrl * NATOMS] += data[icpy + NATOMS];
-            vx[icpy + icntrl * NATOMS] += data[DOF];
-            vy[icpy + icntrl * NATOMS] += data[DOF + NATOMS];
-          }
-          icntrl += 1;
-          //xp=&data[0]; yp=&data[NATOMS]; 
-          //vx=&data[DOF]; vx=&data[DOF+NATOMS];
           //! clean-up (!)
+          write_out(data, timestep);
           free(data);
         }
         nextline:;
@@ -163,3 +154,77 @@ void read_dirs(void){
     }
   }
 }
+
+static void write_out(double *DUMP,long step)
+{ int i,mode,space;
+  double x,y,inp;
+  double *X0,*Y0,*data,*ev,*uu,*dx,*dy;
+
+  /* pointers to initial lattice positions: beware, these are __fractional__ coordinates (!)
+     -> use frac2real() to convert to __real__ coordinates */
+  X0=&POS[0]; Y0=&X0[NATOMS];
+
+  // SNAPSHOT: header
+  fprintf(PR,"ITEM: TIMESTEP\n%li\n",step);
+  fprintf(PR,"ITEM: NUMBER OF ATOMS\n%i\n",NATOMS);
+  fprintf(PR,"ITEM: BOX BOUNDS pp ss pp\n");
+  fprintf(PR,"0 %e\n",BOX[0]);
+  fprintf(PR,"0 %e\n",BOX[1]);
+  fprintf(PR,"-0.05 0.05\n");
+
+  /* space must be large enough so as to have enough memory for whatever happens next, but
+     its precise value does not matter */
+
+  space=2*NATOMS;
+  data=(double*)malloc(space*sizeof(double));
+  for(i=0;i<space;i++) data[i]=0.0;
+
+  // pointer to particle displacements
+  uu=&DUMP[0];
+
+  // SNAPSHOT: projected version
+
+  dx=&data[0]; dy=&data[NATOMS];
+
+  fprintf(PR,"ITEM: ATOMS id x y\n");
+
+  for(i=0;i<NATOMS;i++) {
+    frac2real(X0[i],Y0[i],&x,&y);
+    fprintf(PR,"%i %e %e\n",i+1,x+dx[i],y+dy[i]);
+  }
+
+  free(data);
+}
+void frac2real(double fx,double fy,double *x,double *y)
+{ 
+  *x = fx*BOX[0] ;
+  *y = fy*BOX[1];
+}
+/*
+void write_out(double *data, int nStep, int NC)
+{
+  int icpy, iloop;
+  if (NC == -1)
+  {
+    for (iloop = 0; iloop < NATOMS; iloop++)
+    {
+      xp[iloop] = 0.0; yp[iloop] = 0.0; 
+      vx[iloop] = 0.0; vy[iloop] = 0.0; 
+    }
+  }
+  printf("NC %i\n",NC);
+  for ( icpy = 0; icpy < NATOMS; icpy++)
+  {
+    xp[icpy ] += data[icpy];
+    yp[icpy ] += data[icpy + NATOMS];
+    vx[icpy ] += data[DOF];
+    vy[icpy ] += data[DOF + NATOMS];
+  }
+  PR = fopen("meantest","a");
+  int i;
+  for (i = 0; i < NATOMS; i++)
+  {
+    fprintf(PR,"%i %lf %lf\n",i, xp[i]/4,yp[i]/4);
+  }
+  fclose(PR);
+}*/
