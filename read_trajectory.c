@@ -5,12 +5,12 @@
 // these are used to set the snapshot range each process has to analyze
 //static int NCMIN,NCMAX;
 // file pointers, explained below
-static FILE *TR,*PR;
-static double *xp, *yp, *vx, *vy;
-static void write_out(double *DUMP,long step);
+static FILE *TR;
+static double *xp, *yp, *vx, *vy, *CR1, *CR2, *fx, *fy;
+static int *time_list;
 
 void read_dirs(void){
-  char (*dir_name)[9];
+  char (*dir_name)[5];
   int nf, ndir, nStep;
   char cmd[1024], dir_list[512];
   FILE *fp;
@@ -49,23 +49,35 @@ void read_dirs(void){
    * number of atoms (as nAtoms),
    * also the size of the box (bxSize) 
   */
-
   get_info( dir_name[0], &nStep );
   printf( "%i, %i\n", nStep, DOF );
   printf( "number %i\n", NATOMS );
-  PR = fopen("mean","w");
-  int idir, ikick, NC;
-  for ( ikick = 1; ikick < 2; ikick++)
+  int idir, ikick, iloop, NC;
+  char kick[4];
+  for ( ikick = 1; ikick < 21; ikick++)
   {
-    NC = -1;
-    xp = (double *)malloc( NATOMS * sizeof( double ) );
-    yp = (double *)malloc( NATOMS * sizeof( double ) );
-    vx = (double *)malloc( NATOMS * sizeof( double ) );
-    vy = (double *)malloc( NATOMS * sizeof( double ) );
-
+    xp = (double *)malloc( NATOMS * nStep * sizeof( double ) );
+    yp = (double *)malloc( NATOMS * nStep * sizeof( double ) );
+    vx = (double *)malloc( NATOMS * nStep * sizeof( double ) );
+    vy = (double *)malloc( NATOMS * nStep * sizeof( double ) );
+    vy = (double *)malloc( NATOMS * nStep * sizeof( double ) );
+    fx = (double *)malloc( NATOMS * nStep * sizeof( double ) );
+    fy = (double *)malloc( NATOMS * nStep * sizeof( double ) );
+    CR1 = (double *)malloc( NATOMS * nStep * sizeof( double ) );
+    CR2 = (double *)malloc( NATOMS * nStep * sizeof( double ) );
+    time_list = (int *)malloc( nStep * sizeof( int ) );
+    for (iloop = 0; iloop < NATOMS * nStep ; iloop++)
+    {
+      xp[iloop] = 0.0; yp[iloop] = 0.0; 
+      vx[iloop] = 0.0; vy[iloop] = 0.0; 
+      fx[iloop] = 0.0; fy[iloop] = 0.0; 
+      CR2[iloop] = 0.0; CR2[iloop] = 0.0; 
+    }
+    for (iloop = 0; iloop<nStep; iloop++) time_list[iloop] = 0;
     for ( idir = 0; idir < ndir; idir++)
     {
-      char kick[4]; snprintf( kick, 4, "%f", ikick * 0.1 );
+      NC = -1;
+      snprintf( kick, 4, "%f", ikick * 0.1 );
       char cwd[1024]; strcpy( cwd, get_pwd() );
       char here[2056];
       strcpy( here, strcat(strcat(strcat(cwd,"/"),dir_name[idir]),"/") );
@@ -77,8 +89,7 @@ void read_dirs(void){
       //! set TR = file pointer for reading the trajectory
       sprintf(cmd,"zcat %s",here); TR=popen(cmd,"r");
 
-      nreq=split_string("c_R[1] c_R[2] vx vy fx fy",KEYS);
-      printf("dir %s\n", dir_name[idir]);
+      nreq=split_string("x y vx vy c_R[1] c_R[2] fx fy",KEYS);
       while( fgets(buffer,sizeof buffer,TR)!=NULL ) 
       {
         //! beginning of new snapshot
@@ -86,7 +97,7 @@ void read_dirs(void){
         {
           fgets(buffer,sizeof buffer,TR);
           sscanf(buffer,"%li",&timestep);
-          NC++; goto nextline;
+          NC++; time_list[NC] = timestep; goto nextline;
         }
         //! if snapshot index NC is not in the range of the current processor, skip it
         //if(NC<NCMIN || NC>=NCMAX) goto nextline;
@@ -135,96 +146,57 @@ void read_dirs(void){
             fscanf(TR,"%lf",&tmp);
             ind=PTR[c].c; if(ind>=0) KEYS[ind].v=tmp;
             c++; 
-            printf("nc: %i %i\n",c, nc);
             if(c==nc) 
             {
               //! convert lammps id to C-style, store data
               ind=(int)KEYS[nreq].v; ind--;
               for(j=0;j<nreq;j++) data[j*natoms+ind]=KEYS[j].v;
               c=0; n++;
+              xp[ind + NC * NATOMS] += data[ind];
+              yp[ind + NC * NATOMS] += data[ind + NATOMS];
+              vx[ind + NC * NATOMS] += data[ind + DOF];
+              vy[ind + NC * NATOMS] += data[ind + DOF + NATOMS];
+              CR1[ind + NC * NATOMS] += data[ind + 2 * DOF];
+              CR2[ind + NC * NATOMS] += data[ind + 2 * DOF + NATOMS];
+              fx[ind + NC * NATOMS] += data[ind + 3 * DOF ];
+              fy[ind + NC * NATOMS] += data[ind + 3 * DOF + NATOMS];
             }
           }
           //! clean-up (!)
-          write_out(data, timestep);
           free(data);
         }
         nextline:;
-        //printf("%s\n%i\n", here, icntrl);
+      }
+      //write_out(xp, yp);
+    }
+    char outer[1024];
+    sprintf(outer,"traj.%i_%s", RUNID, kick);
+    FILE *fout,*fzip;
+    fout =fopen(outer,"w");
+    printf("%s\n",outer);
+    int iout, jout;
+    for (iout = 0; iout<nStep; iout++ )
+    {
+      fprintf(fout,"ITEM: TIMESTEP\n%i\n",time_list[iout]);
+      fprintf(fout,"ITEM: NUMBER OF ATOMS\n%i\n",NATOMS);
+      fprintf(fout,"ITEM: BOX BOUNDS pp ss pp\n");
+      fprintf(fout,"0 %e\n",BOX[0]);
+      fprintf(fout,"0 %e\n",BOX[1]);
+      fprintf(fout,"-0.05 0.05\n");
+      fprintf(fout,"ITEM: ATOMS id x y vx vy c_R[1] c_R[2] fx fy\n");
+      for (jout=0; jout<NATOMS; jout++)
+      {
+        fprintf(fout,"%i %e %e",jout+1, xp[jout+iout*NATOMS]/ndir,yp[jout+iout*NATOMS]/ndir);
+        fprintf(fout," %e %e",vx[jout+iout*NATOMS]/ndir,vy[jout+iout*NATOMS]/ndir);
+        fprintf(fout," %e %e",CR1[jout+iout*NATOMS]/ndir,CR2[jout+iout*NATOMS]/ndir);
+        fprintf(fout," %e %e\n",fx[jout+iout*NATOMS]/ndir,fy[jout+iout*NATOMS]/ndir);
       }
     }
+    fclose(fout);
+    sprintf(cmd, "gzip %s",outer);
+    fzip = popen(cmd,"r");pclose(fzip);
   }
+  FILE *fmv;
+  sprintf(cmd, "mkdir mean & mv *.gz ./mean/" );
+  fmv = popen(cmd, "r"); pclose(fmv);
 }
-
-static void write_out(double *DUMP,long step)
-{ int i,mode,space;
-  double x,y,inp;
-  double *X0,*Y0,*data,*ev,*uu,*dx,*dy;
-
-  /* pointers to initial lattice positions: beware, these are __fractional__ coordinates (!)
-     -> use frac2real() to convert to __real__ coordinates */
-  X0=&POS[0]; Y0=&X0[NATOMS];
-
-  // SNAPSHOT: header
-  fprintf(PR,"ITEM: TIMESTEP\n%li\n",step);
-  fprintf(PR,"ITEM: NUMBER OF ATOMS\n%i\n",NATOMS);
-  fprintf(PR,"ITEM: BOX BOUNDS pp ss pp\n");
-  fprintf(PR,"0 %e\n",BOX[0]);
-  fprintf(PR,"0 %e\n",BOX[1]);
-  fprintf(PR,"-0.05 0.05\n");
-
-  /* space must be large enough so as to have enough memory for whatever happens next, but
-     its precise value does not matter */
-
-  space=2*NATOMS;
-  data=(double*)malloc(space*sizeof(double));
-  for(i=0;i<space;i++) data[i]=0.0;
-
-  // pointer to particle displacements
-  uu=&DUMP[0];
-
-  // SNAPSHOT: projected version
-
-  dx=&data[0]; dy=&data[NATOMS];
-
-  fprintf(PR,"ITEM: ATOMS id x y\n");
-
-  for(i=0;i<NATOMS;i++) {
-    frac2real(X0[i],Y0[i],&x,&y);
-    fprintf(PR,"%i %e %e\n",i+1,x+dx[i],y+dy[i]);
-  }
-
-  free(data);
-}
-void frac2real(double fx,double fy,double *x,double *y)
-{ 
-  *x = fx*BOX[0] ;
-  *y = fy*BOX[1];
-}
-/*
-void write_out(double *data, int nStep, int NC)
-{
-  int icpy, iloop;
-  if (NC == -1)
-  {
-    for (iloop = 0; iloop < NATOMS; iloop++)
-    {
-      xp[iloop] = 0.0; yp[iloop] = 0.0; 
-      vx[iloop] = 0.0; vy[iloop] = 0.0; 
-    }
-  }
-  printf("NC %i\n",NC);
-  for ( icpy = 0; icpy < NATOMS; icpy++)
-  {
-    xp[icpy ] += data[icpy];
-    yp[icpy ] += data[icpy + NATOMS];
-    vx[icpy ] += data[DOF];
-    vy[icpy ] += data[DOF + NATOMS];
-  }
-  PR = fopen("meantest","a");
-  int i;
-  for (i = 0; i < NATOMS; i++)
-  {
-    fprintf(PR,"%i %lf %lf\n",i, xp[i]/4,yp[i]/4);
-  }
-  fclose(PR);
-}*/
