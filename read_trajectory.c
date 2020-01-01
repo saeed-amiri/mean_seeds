@@ -1,10 +1,6 @@
 #include "defs.h"
 #include "shortcuts.h"
-// index counting the current snapshot while reading the lammps trajectory file
-//static int NC=-1;
-// these are used to set the snapshot range each process has to analyze
-//static int NCMIN,NCMAX;
-// file pointers, explained below
+// file pointers
 static FILE *TR;
 static double *xp, *yp, *vx, *vy, *CR1, *CR2, *fx, *fy;
 static int *time_list;
@@ -29,7 +25,7 @@ void read_dirs(void){
   while (fscanf(fp,"%s",dir_list) == 1)
   {
     chdir(dir_list);
-    //! checl=k if PARAM.base file exist in the directory
+    //! check if PARAM.base file exist in the directory
     int jfile = file_exists("PARAM.base");
     if (jfile == 1) {
       strcpy(dir_name[ndir], dir_list); ndir += 1; 
@@ -99,8 +95,6 @@ void read_dirs(void){
           sscanf(buffer,"%li",&timestep);
           NC++; time_list[NC] = timestep; goto nextline;
         }
-        //! if snapshot index NC is not in the range of the current processor, skip it
-        //if(NC<NCMIN || NC>=NCMAX) goto nextline;
 
         if(StartsWith(buffer,"ITEM: NUMBER OF ATOMS")) 
         {
@@ -167,7 +161,6 @@ void read_dirs(void){
         }
         nextline:;
       }
-      //write_out(xp, yp);
     }
     char outer[1024];
     sprintf(outer,"traj.%i_%s", RUNID, kick);
