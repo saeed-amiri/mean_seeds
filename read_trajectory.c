@@ -2,41 +2,39 @@
 #include "shortcuts.h"
 // file pointers
 static FILE *TR;
-static double *xp, *yp, *vx, *vy, *CR1, *CR2, *fx, *fy;
+static double *xp,*yp,*vx,*vy,*CR1,*CR2,*fx,*fy;
 static int *time_list;
 
 void read_dirs(void){
-  char (*dir_name)[5];
-  int nf, ndir, nStep;
-  char cmd[1024], dir_list[512];
-  FILE *fp;
-  int natoms,ind,j;
-  long timestep;
+  int nf,ndir,nStep,natoms,ind,j;
+  int i,n,c,nc,nreq;
   double tmp,*data;
+  long timestep;
+  char (*dir_name)[5];
+  char cmd[1024],pmd[1024],dir_list[512],buffer[1024]; 
   STRING KEYS[20],FIELDS[20],*PTR;
-  char buffer[1024]; int i,n,c,nc,nreq;
+  FILE *fp;
 
-  char pmd[1024];
   nf = get_ndirs();
-  dir_name =  malloc(nf * sizeof(dir_name));
-  sprintf(pmd,"ls -d */ | sed 's#/##'"); fp=popen(pmd,"r"); 
+  dir_name =  malloc( nf * sizeof(dir_name) );
+  sprintf( pmd,"ls -d */ | sed 's#/##'" ); fp = popen( pmd,"r" ); 
 
   ndir = 0;
-  while (fscanf(fp,"%s",dir_list) == 1)
+  while ( fscanf(fp,"%s",dir_list) == 1 )
   {
-    chdir(dir_list);
-    //! check if PARAM.base file exist in the directory
-    int jfile = file_exists("PARAM.base");
-    if (jfile == 1) {
-      strcpy(dir_name[ndir], dir_list); ndir += 1; 
-    }
-    chdir("..");
+    chdir( dir_list );
+      //! check if PARAM.base file exist in the directory
+      int jfile = file_exists( "PARAM.base" );
+      if (jfile == 1) {
+        strcpy( dir_name[ndir], dir_list ); ndir += 1; 
+      }
+    chdir( ".." );
   }
-  printf("\nmain: number of run dirs: %i:\n\n", ndir); pclose(fp);
+  printf( "\nmain: number of run dirs: %i:\n", ndir ); pclose(fp);
   int ilen;
   for (ilen = 0; ilen < ndir; ilen++)
   {
-    printf("%s, %lu\n",dir_name[ilen],strlen(dir_name[ilen]));
+    printf("%s, strlen: %lu\n",dir_name[ilen],strlen(dir_name[ilen]));
   }
 
   dir_name = realloc(dir_name, ndir * sizeof(dir_name));
@@ -46,9 +44,8 @@ void read_dirs(void){
    * also the size of the box (bxSize) 
   */
   get_info( dir_name[0], &nStep );
-  printf( "%i, %i\n", nStep, DOF );
-  printf( "number %i\n", NATOMS );
-  int idir, ikick, iloop, NC;
+  printf( "NSTEP: %i, NATOMS: %i\n", nStep, NATOMS );
+  int idir,ikick,iloop,NC;
   char kick[4];
   for ( ikick = 1; ikick < 21; ikick++)
   {
@@ -62,6 +59,7 @@ void read_dirs(void){
     CR1 = (double *)malloc( NATOMS * nStep * sizeof( double ) );
     CR2 = (double *)malloc( NATOMS * nStep * sizeof( double ) );
     time_list = (int *)malloc( nStep * sizeof( int ) );
+    
     for (iloop = 0; iloop < NATOMS * nStep ; iloop++)
     {
       xp[iloop] = 0.0; yp[iloop] = 0.0; 
@@ -69,8 +67,9 @@ void read_dirs(void){
       fx[iloop] = 0.0; fy[iloop] = 0.0; 
       CR2[iloop] = 0.0; CR2[iloop] = 0.0; 
     }
-    for (iloop = 0; iloop<nStep; iloop++) time_list[iloop] = 0;
-    for ( idir = 0; idir < ndir; idir++)
+    for ( iloop = 0; iloop<nStep; iloop++ ) time_list[iloop] = 0;
+    
+    for ( idir = 0; idir < ndir; idir++ )
     {
       NC = -1;
       snprintf( kick, 4, "%f", ikick * 0.1 );
@@ -86,17 +85,18 @@ void read_dirs(void){
       sprintf(cmd,"zcat %s",here); TR=popen(cmd,"r");
 
       nreq=split_string("x y vx vy c_R[1] c_R[2] fx fy",KEYS);
+
       while( fgets(buffer,sizeof buffer,TR)!=NULL ) 
       {
         //! beginning of new snapshot
-        if(StartsWith(buffer,"ITEM: TIMESTEP"))
+        if( StartsWith(buffer,"ITEM: TIMESTEP") )
         {
           fgets(buffer,sizeof buffer,TR);
           sscanf(buffer,"%li",&timestep);
           NC++; time_list[NC] = timestep; goto nextline;
         }
 
-        if(StartsWith(buffer,"ITEM: NUMBER OF ATOMS")) 
+        if( StartsWith(buffer,"ITEM: NUMBER OF ATOMS") ) 
         {
           fgets(buffer,sizeof buffer,TR);
           sscanf(buffer,"%i",&natoms);
@@ -105,47 +105,48 @@ void read_dirs(void){
 
         //! HERE THE ATOM DATA IS BEING READ, THEN ANALYZED 
 
-        if(StartsWith(buffer,"ITEM: ATOMS")) 
+        if( StartsWith(buffer,"ITEM: ATOMS") ) 
         {
           //! make a list structure of the atom properties stored in the data
           nc=split_string(buffer,FIELDS)-2; PTR=&FIELDS[2];
 
           //! needed for sanity check
-          for(i=0;i<=nreq;i++) KEYS[i].ok=0;
+          for( i=0; i<=nreq; i++ ) KEYS[i].ok=0;
 
           //! for every field in PTR mark the order in which it appears in KEYS; use -1 for fields that are __not__ members of KEYS
-          for(c=0;c<nc;c++) 
+          for( c=0; c<nc; c++ ) 
           {
             PTR[c].c=-1;
             //! atom ids are always required, we put these last = nreq (!)
-            if(strcmp(PTR[c].w,"id")==0) 
+            if( strcmp(PTR[c].w,"id")==0 ) 
             {
               PTR[c].c=nreq; KEYS[nreq].ok++;
             } else 
             {
-              for(i=0;i<nreq;i++) if(strcmp(PTR[c].w,KEYS[i].w)==0) 
+              for( i=0; i<nreq; i++) if( strcmp(PTR[c].w,KEYS[i].w)==0 ) 
               {
                 PTR[c].c=i; KEYS[i].ok++; break;
               }
             }
           }
           //! SANITY CHECK (!)
-          if(KEYS[nreq].ok!=1) printerror("E: missing/duplicate atom ids\n");
-          for(i=0;i<nreq;i++) if(KEYS[i].ok!=1) printerror("E: missing/duplicate atom property: %s\n",KEYS[i].w);
+          if( KEYS[nreq].ok!=1 ) printerror("E: missing/duplicate atom ids\n");
+          for(i=0;i<nreq;i++) if( KEYS[i].ok!=1 ) printerror("E: missing/duplicate atom property: %s\n",KEYS[i].w);
 
           //! read and store the data
           data=(double*)malloc(natoms*nreq*sizeof(double));
-          for(i=c=n=0;i<natoms*nc;i++) 
+          for( i=c=n=0; i<natoms*nc; i++) 
           {
             fscanf(TR,"%lf",&tmp);
-            ind=PTR[c].c; if(ind>=0) KEYS[ind].v=tmp;
+            ind=PTR[c].c; if( ind>=0 ) KEYS[ind].v=tmp;
             c++; 
-            if(c==nc) 
+            if( c==nc ) 
             {
               //! convert lammps id to C-style, store data
               ind=(int)KEYS[nreq].v; ind--;
-              for(j=0;j<nreq;j++) data[j*natoms+ind]=KEYS[j].v;
+              for( j=0; j<nreq; j++ ) data[j*natoms+ind]=KEYS[j].v;
               c=0; n++;
+              //! save to 1D-array
               xp[ind + NC * NATOMS] += data[ind];
               yp[ind + NC * NATOMS] += data[ind + NATOMS];
               vx[ind + NC * NATOMS] += data[ind + DOF];
@@ -168,7 +169,7 @@ void read_dirs(void){
     fout =fopen(outer,"w");
     printf("%s\n",outer);
     int iout, jout;
-    for (iout = 0; iout<nStep; iout++ )
+    for ( iout = 0; iout<nStep; iout++ )
     {
       fprintf(fout,"ITEM: TIMESTEP\n%i\n",time_list[iout]);
       fprintf(fout,"ITEM: NUMBER OF ATOMS\n%i\n",NATOMS);
@@ -177,7 +178,7 @@ void read_dirs(void){
       fprintf(fout,"0 %e\n",BOX[1]);
       fprintf(fout,"-0.05 0.05\n");
       fprintf(fout,"ITEM: ATOMS id x y vx vy c_R[1] c_R[2] fx fy\n");
-      for (jout=0; jout<NATOMS; jout++)
+      for ( jout=0; jout<NATOMS; jout++ )
       {
         fprintf(fout,"%i %e %e",jout+1, xp[jout+iout*NATOMS]/ndir,yp[jout+iout*NATOMS]/ndir);
         fprintf(fout," %e %e",vx[jout+iout*NATOMS]/ndir,vy[jout+iout*NATOMS]/ndir);
@@ -188,6 +189,7 @@ void read_dirs(void){
     fclose(fout);
     sprintf(cmd, "gzip %s",outer);
     fzip = popen(cmd,"r");pclose(fzip);
+    free(xp); free(yp); free(vx); free(vy); free(fx); free(fy); free(CR1); free(CR2);
   }
   FILE *fmv;
   sprintf(cmd, "mkdir mean & mv *.gz ./mean/" );
